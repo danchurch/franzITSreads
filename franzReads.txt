@@ -264,13 +264,25 @@ get.sample.name <- function(fname) strsplit(basename(fname), "_")[[1]][1]
 sample.names <- unname(sapply(cutFs, get.sample.name))
 
 plotQualityProfile(cutFs[1:2])
+## huh, these don't look amazing. At least they have enough depth.
 
+################################################################################
 ## side note, I don't really like their plotter. 
 ## Let's look at these outside of R in good old fashioned fastqc 
 cp /media/vol/franzData/rawReadsReorganized/cutadapt/* /media/vol/franzData/rawReadsReorganized/concatted4fastqc/
 cd /media/vol/franzData/rawReadsReorganized/concatted4fastqc/
 gunzip *
-cat * | gzip > oneBigFastqFranzITSreads.fastq.gz
+cat *R1* | gzip > oneBigFastqFranzITS_R1_reads.fastq.gz
+cat *R2* | gzip > oneBigFastqFranzITS_R2_reads.fastq.gz
 rm *fastq
-fastqc oneBigFastqFranzITSreads.fastq.gz
+fastqc oneBigFastqFranzITS_R1_reads.fastq.gz -o /media/vol/franzData/franzITSreads/
+fastqc oneBigFastqFranzITS_R2_reads.fastq.gz -o /media/vol/franzData/franzITSreads/
+cd /media/vol/franzData/franzITSreads
+firefox *html
+## okay, that is nice to look at. 
+################################################################################
+
+## anyway, on down the pipeline
+plotQualityProfile(cutRs[1:2])
+
 

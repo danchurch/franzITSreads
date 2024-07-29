@@ -1,0 +1,116 @@
+## let's see what Franz's reads look like
+
+## put his reads on our beastly, old, slow drive
+mv /home/daniel/Downloads/Raw.zip /media/vol/franzData/
+
+unzip Raw.zip
+
+## what are the primers?
+
+## GATGAAGAACGYAGYRAA
+## RBTTTCTTTTCCTCCGCT
+
+##     GATGAAGAACG Y  AG Y   R  AA
+
+fprim='GATGAAGAACG[CT]AG[CT][AG]AA'
+
+## the full IUPAC reverse complement would be:
+'TTYRCTRCGTTCTTCATC'
+## so...
+fprimRC='TT..CT.CGTTCTTCATC'
+
+##      R    B  TTTCTTTTCCTCCGCT
+rprim='[AG][GCT]TTTCTTTTCCTCCGCT'
+
+## the full reverse complement IUPAC would be:
+
+## or
+#rprim='..TTTCTTTTCCTCCGCT'
+
+rprimRC='AGCGGAGGAAAAGAAA..'
+
+## look for these
+cd /media/vol/franzData/Raw/FITS2/EC_2021_080_057_F_ITS_E192_L001-ds.c5b0e235b400480c9f7e35d36a59096f
+
+zgrep --color $rprim *R1*
+zgrep --color $rprim *R2*
+zgrep --color $fprim *R1*
+zgrep --color $fprim *R2*
+
+## seems consistent, assume this is the case for all the files, R2 has the forward primer-linked sequences,
+## R1 has the reverse.
+
+## let's try cutadapt.
+
+## following the cutadapt manual (https://cutadapt.readthedocs.io/en/stable/recipes.html)
+
+conda activate cutadapt
+
+cd /media/vol/franzData/Raw/FITS2
+outdir="/media/vol/franzData/trimmedReads/"
+#mkdir $outdir
+for i in *; do
+  cd $i
+  echo $PWD
+  ls
+  R1=$(ls *R1*.fastq.gz)
+  R2=$(ls *R2*.fastq.gz)
+  echo ${R1} ${R2}
+  echo $outdir${R1} $outdir${R2}
+  cutadapt -a RBTTTCTTTTCCTCCGCT...TTYRCTRCGTTCTTCATC \
+           -A GATGAAGAACGYAGYRAA...AGCGGAGGAAAAGAAAVY \
+           --discard-untrimmed \
+           --match-read-wildcards \
+           -o $outdir${R1} \
+           -p $outdir${R2} \
+           $R1 $R2
+  cd ..
+  echo $PWD
+  echo "#########################################################"
+done
+
+## that gives some empty reads, probably some floating primers
+## get rid of these:
+
+
+cd $outdir
+for i in *; do
+  echo $i
+  seqtk seq -L 50 $i | gzip > ${i}_noshorts
+  mv ${i}_noshorts $i
+  ls $i
+done
+
+## example 
+
+## did that work? Let's assume it did, not much time. 
+
+## moving on with dada2:
+
+R
+
+library(dada2)
+library(ShortRead)
+library(Biostrings)
+
+plotQualityProfile("/media/vol/franzData/trimmedReads/331_S331_L001_R2_001.fastq.gz")
+
+plotQualityProfile("/media/vol/franzData/trimmedReads/", aggregate=TRUE)
+
+
+## okay, works. That's what they asked for but now they want to
+## run through full dada2 pipeline with me
+
+## that's more work. Let's start a repo:
+
+git clone https://github.com/danchurch/franzITSreads.git
+
+## test
+
+touch thisIsNotReal.txt
+
+git config --global user.email "danchurchthomas@gmail.com"
+git config --global user.name "danchurch"
+git remote set-url origin git@github.com:danchurch/franzITSreads.git
+
+

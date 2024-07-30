@@ -157,15 +157,15 @@ for i in {10..39}; do
   cp EC_2021_080_0${i}_FITS_E176_L001-ds.*/* /media/vol/franzData/rawReadsReorganized/
 done
 
+
 ## from there I think we can follow the tutorial in R
 https://benjjneb.github.io/dada2/ITS_workflow.html
 
 library(dada2)
-packageVersion("dada2")
 library(ShortRead)
-packageVersion("ShortRead")
 library(Biostrings)
-packageVersion("Biostrings")
+library(phyloseq)
+library(ggplot2)
 
 path <- "/media/vol/franzData/rawReadsReorganized" 
 
@@ -283,6 +283,124 @@ firefox *html
 ################################################################################
 
 ## anyway, on down the pipeline
-plotQualityProfile(cutRs[1:2])
+
+filtFs <- file.path(path.cut, "filtered", basename(cutFs))
+filtRs <- file.path(path.cut, "filtered", basename(cutRs))
+
+## on the tutorial they do an additional filtering step. Don't know why
+## they don't do this earlier.
+
+## the settings used in the tutorial for the 
+## following command cause the vast majority to
+## be thrown out. So I relaxed the max expected
+## error from 2 to 5. We still lose average of ~50%
+
+out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, 
+    maxN = 0, 
+    maxEE = c(5, 5), 
+    truncQ = 2,
+    minLen = 50, 
+    rm.phix = TRUE,
+    compress = TRUE, 
+    multithread = TRUE)  
+
+out
+
+colSums(out) ## 1416136 in, 815679 out
+
+errF <- learnErrors(filtFs, multithread = TRUE)
+errR <- learnErrors(filtRs, multithread = TRUE)
+
+plotErrors(errF, nominalQ = TRUE)
+
+plotErrors(errR, nominalQ = TRUE)
+
+## try pooled. If it takes to long, move to lab computer?
+dadaFs <- dada(filtFs, err = errF, multithread = TRUE, pool=TRUE) ## ~20 min, 10 gig RAM
+dadaRs <- dada(filtRs, err = errR, multithread = TRUE, pool=TRUE) ##
+
+dadaRs
+
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+
+seqtab <- makeSequenceTable(mergers)
+
+?makeSequenceTable
+
+dim(seqtab)
+
+seqtab[1:3,1:2]
+
+sum(seqtab) ##560718 reads. Seems low.
+
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+
+## check the variability in sequence length:
+hist(nchar(getSequences(seqtab.nochim)), breaks=20)
+
+getN <- function(x) sum(getUniques(x))
+
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN),
+    rowSums(seqtab.nochim))
+
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+
+track
+
+## side note, prepping for taxonomic id
+
+## I downloaded UNITE sh_general_release_04.04.2024.tgz
+## as available from:
+## https://doi.plutof.ut.ee/doi/10.15156/BIO/2959332
+## https://doi.org/10.15156/BIO/2959332
+
+## the general page is here: https://unite.ut.ee/repository.php
+
+## this is version 10.0, dynamic, non-dev version with fewer singletons.
+
+unite.ref <- "/media/vol/franzData/sh_general_release_dynamic_04.04.2024.fasta"  # CHANGE ME to location on your machine
+
+## start time is 2024-07-29 17:10
+taxa <- assignTaxonomy(seqtab.nochim, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+print(paste("finish time is", Sys.time())) ## that took maybe 15 min, 15 gig RAM
+
+## okay, finish this up, get to a phyloseq object with rep seqs and taxonomy and metadata
+
+taxa.print <- taxa  # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+
+head(taxa.print) 
+
+## we don't have a metadata file, but can get some information from 
+## your 
+samples.out <- rownames(seqtab.nochim)
+
+## theoretically, we can just take the order of these samples as their sample number,
+## but not very robust, so make a function that gets the sample out of the name:
+
+getSampNu <- function(x){paste0("S", as.character(as.integer(strsplit(x, "_")[[1]][1]) - 192))}
+
+## use these as new rownames
+rownames(seqtab.nochim) <- sapply(samples.out, getSampNu)
+
+seqtab.nochim[1:5,1:2]
+
+## make our phyloseq object:
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               tax_table(taxa))
+
+## we would normally add environmental data here
+
+## change out the repseqs for ASV name/numbers
+
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+otu_table(ps)[1:5,1:5]
+
+## should be ready for ordinations, etc. But we need environmental data. 
 
 

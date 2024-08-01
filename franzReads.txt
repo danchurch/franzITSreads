@@ -114,7 +114,6 @@ git config --global user.name "danchurch"
 git remote set-url origin git@github.com:danchurch/franzITSreads.git
 
 ## so, franz would love it if everything were done in R.
-## pain in the ass. I hate file manipulation in r. 
 
 
 
@@ -489,6 +488,7 @@ list.files(path)
 ## above we noted that the sequences with the forward primer are the R2:
 
 fnFs <- sort(list.files(path, pattern = "R2_001.fastq.gz", full.names = TRUE))
+
 fnRs <- sort(list.files(path, pattern = "R1_001.fastq.gz", full.names = TRUE))
 
 FWD <- "GGWACWGGWTGAACWGTWTAYCCYCC"  
@@ -606,7 +606,6 @@ cd /media/vol/franzData/franzITSreads
 firefox *html
 ################################################################################
 
-
 filtFs <- file.path(path.cut, "filtered", basename(cutFs))
 filtRs <- file.path(path.cut, "filtered", basename(cutRs))
 
@@ -616,28 +615,80 @@ filtRs <- file.path(path.cut, "filtered", basename(cutRs))
 
 ## the target CO1 region is 313 BP, so we can trim a lot, if this is helpful
 
-
-out <- filterAndTrim(cutFs, filtFs, 
+out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, 
     maxN = 0, 
     truncQ = 5,
-    truncLen = 250,
+    truncLen = c(210,260),
     minLen = 50, 
     rm.phix = TRUE,
     compress = TRUE, 
     multithread = TRUE)  
+
 
 plotQualityProfile(cutFs, aggregate=TRUE)
 
+dev.new()
 plotQualityProfile(filtFs, aggregate=TRUE)
 
-plotQualityProfile("/media/vol/franzData/trimmedReads/", aggregate=TRUE)
-
 ## for reverse/R1 reads, keep up to 260 bp:
-outR <- filterAndTrim(cutRs, filtRs, 
-    maxN = 0, 
-    truncQ = 10,
-    truncLen = 260,
-    minLen = 50, 
-    rm.phix = TRUE,
-    compress = TRUE, 
-    multithread = TRUE)  
+
+plotQualityProfile(cutRs, aggregate=TRUE)
+
+plotQualityProfile(filtRs, aggregate=TRUE)
+
+## looks good.
+
+colSums(out) ## 1386093   1382028
+
+## assuming that worked, we need a script,
+## because this will need to run through to finish
+## while I am away...
+
+print(Sys.time())
+errF <- learnErrors(filtFs, multithread = TRUE)
+print(Sys.time())
+print("########################################################")
+print(Sys.time())
+errR <- learnErrors(filtRs, multithread = TRUE)
+print(Sys.time())
+
+save(errF, file="errF_CO1.rda")
+save(errR, file="errR_CO1.rda")
+
+plotErrors(errF, nominalQ = TRUE)
+
+plotErrors(errR, nominalQ = TRUE)
+
+#### finishCO1dada2.r #####
+
+library(dada2)
+library(ShortRead)
+library(Biostrings)
+library(phyloseq)
+library(ggplot2)
+load(file="/media/vol/franzData/rawReadsReorganized/errF_CO1.rda")
+load(file="/media/vol/franzData/rawReadsReorganized/errR_CO1.rda")
+setwd("/media/vol/franzData/rawReadsReorganized")
+path <- "/media/vol/franzData/rawReadsReorganized"
+path.cut <- file.path(path, "cutadapt")
+cutFs <- sort(list.files(path.cut, pattern = "R2_001.fastq.gz", full.names = TRUE))
+cutRs <- sort(list.files(path.cut, pattern = "R1_001.fastq.gz", full.names = TRUE))
+filtFs <- file.path(path.cut, "filtered", basename(cutFs))
+filtRs <- file.path(path.cut, "filtered", basename(cutRs))
+print(Sys.time())
+dadaFs <- dada(filtFs, err = errF, multithread = TRUE, pool=TRUE) 
+print(Sys.time())
+print("########################################################")
+print(Sys.time())
+dadaRs <- dada(filtRs, err = errR, multithread = TRUE, pool=TRUE) 
+print(Sys.time())
+save(dadaFs, file="dadaFs_CO1.rda")
+save(dadaRs, file="dadaRs_CO1.rda")
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+save(mergers, file="mergersCO1.rda")
+
+#### finishCO1dada2.r #####
+
+nohup Rscript finishCO1dada2.r &> finishCO1dada2.log &  ## 
+
+

@@ -373,7 +373,6 @@ rownames(taxa.print) <- NULL
 head(taxa.print) 
 
 ## we don't have a metadata file, but can get some information from 
-## your 
 samples.out <- rownames(seqtab.nochim)
 
 ## theoretically, we can just take the order of these samples as their sample number,
@@ -774,33 +773,20 @@ print(paste("start time is", Sys.time())) ## 2024-08-02 12:48:34
 taxa <- assignTaxonomy(seqtab.nochim, midori.ref, multithread = TRUE, tryRC = TRUE)
 print(paste("finish time is", Sys.time())) ## memory not enough. port this over to the lab computer:
 
-saveRDS(seqtab.nochim, file="seqtab_nochim_CO1.rds")
+#saveRDS(seqtab.nochim, file="seqtab_nochim_CO1.rds")
 
-## put this on the lab comp (from local)
-getFile="/media/vol/franzData/rawReadsReorganized/seqtab_nochim_CO1.rds"
-putItHere="/media/vol1/daniel/franzMetabarcode"
-scp $getFile test@132.180.112.115:$putItHere
+## to recover:
+seqtab.nochim <- readRDS("seqtab_nochim_CO1.rds")
+
+### put this on the lab comp (from local)
+#getFile="/media/vol/franzData/rawReadsReorganized/seqtab_nochim_CO1.rds"
+#putItHere="/media/vol1/daniel/franzMetabarcode"
+#scp $getFile test@132.180.112.115:$putItHere
 
 ## on lab comp
 
-cd /media/vol1/daniel/franzMetabarcode
-
-wget https://www.reference-midori.info/download/Databases/GenBank260_2024-04-15/DADA2/uniq/MIDORI2_UNIQ_NUC_GB260_CO1_DADA2.fasta.gz 
-
-readRDS()
-
-library("dada2")
-
-packageVersion("dada2")
-seqtab.nochim <- readRDS("seqtab_nochim_CO1.rds")
-midori.ref <- "/media/vol1/daniel/franzMetabarcode/MIDORI2_UNIQ_NUC_GB260_CO1_DADA2.fasta"
-
-print(paste("start time is", Sys.time())) ## 2024-08-02 14:09:04, taking all (~60gig) RAM. 
-taxa <- assignTaxonomy(seqtab.nochim, midori.ref, multithread = TRUE, tryRC = TRUE)
-print(paste("finish time is", Sys.time())) ## Will probably break, but going to lunch
-
-
-## and still running. Let's prep a script in case this never ends:
+## preliminary tests show this will take a while. Run it as
+## a script:
 
 cd /media/vol1/daniel/franzMetabarcode
 
@@ -820,4 +806,236 @@ print(paste("finish time is", Sys.time()))
 
 nohup Rscript co1_assignTax.r &> co1_assignTax.log &  ## 
 
+## looks like that needed ~three hours, and stayed pretty constant 
+## at 60gig of RAM. Quite intensive. 
+
+## hopefully this data object is compatible.
+## get it from the lab server:
+
+/media/vol1/daniel/franzMetabarcode/CO1_assTax.rds
+getFile="/media/vol1/daniel/franzMetabarcode/CO1_assTax.rds"
+putItHere="/media/vol/franzData/rawReadsReorganized/"
+scp test@132.180.112.115:$getFile $putItHere 
+
+## back to R on local computer
+
+seqtab.nochim <- readRDS("seqtab_nochim_CO1.rds")
+
+taxa <- readRDS("CO1_assTax.rds")
+
+taxa.print <- taxa  # Removing sequence rownames for display only
+
+rownames(taxa.print) <- NULL
+
+tail(taxa.print) 
+
+samples.out <- rownames(seqtab.nochim)
+
+getSampNu <- function(x){paste0("S", as.character(as.integer(strsplit(x, "_")[[1]][1]) - 96))}
+
+## use these as new rownames
+rownames(seqtab.nochim) <- sapply(samples.out, getSampNu)
+
+seqtab.nochim[1:5,1:2]
+
+## make our phyloseq object:
+
+ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
+               tax_table(taxa))
+
+dna <- Biostrings::DNAStringSet(taxa_names(ps))
+names(dna) <- taxa_names(ps)
+ps <- merge_phyloseq(ps, dna)
+
+taxa_names(ps) <- paste0("ASV", seq(ntaxa(ps)))
+
+otu_table(ps)[1:5,1:5]
+
+sample_names(ps)
+
+## this all looks great, but the taxanomic assignments are
+## horrible:
+
+tax_table(ps)[1:3,]
+
+## most assignments are NAs, even at high levels:
+
+sum(is.na(tax_table(ps)[,"Kingdom"])) ## out of 6568 OTUs, 3072 are not identified to kingdom. The ones that are 
+
+sum(is.na(tax_table(ps)[,"Phylum"])) ## out of 6568 OTUs, 3783 are not identified
+
+plot_bar(ps, fill = "Phylum")
+
+tax_table(ps)
+
+tax_table(ps)[,"Phylum"]
+
+tax_table(ps)$Phylum
+
+## the column names are off, they start with phylum:
+
+colnames(tax_table(ps))
+
+## easy fix
+colnames(tax_table(ps)) <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+
+## looks like we need to try a different method. Maybe try a blast-based method?
+
+## export our rep sequences:
+
+writeXStringSet(refseq(ps), "franzCO1_repset.fa")
+
+## while we're at it, export this highly flawed but reformatted taxa that 
+## should slide right back into the phyloseq object, should be we need it:
+
+write.csv(tax_table(ps), file="rdpClassifier_CO1_taxonomy.csv")
+
+## test this
+tryoutcsv <- read.csv("rdpClassifier_CO1_taxonomy.csv", row.names=1)
+
+head(tryoutcsv)
+
+tax_table(ps) <- as.matrix(minimapTaxAssign)
+
+## a lot (the majority?) of folks are still using blast-based methods.
+## the midori folks offer a blast-formatted dataset, whatever that means:
+
+cd /media/vol/franzData/midoriDB
+
+wget https://www.reference-midori.info/download/Databases/GenBank260_2024-04-15/BLAST/uniq/MIDORI2_UNIQ_NUC_GB260_CO1_BLAST.zip
+
+## this is a compiled blastn database
+
+blastnDatabase="/media/vol/franzData/midoriDB/blast/MIDORI2_UNIQ_NUC_GB260_CO1_BLAST"
+blastn -task blastn  -query franzCO1_repset.fa \
+    -db $blastnDatabase \
+    -num_threads 3 \
+    -num_alignments 1 \
+    -outfmt 10 \
+    -out "franzCO1_midoriBlastTopMatches.csv" &
+
+## ugh, some kind of version error. 
+## let's try minimap2. 
+## we can probably use the existing CO1 database formatted for dada2:
+
+minimap2 -d MIDORI2_UNIQ_NUC_GB260_CO1_DADA2.mmi MIDORI2_UNIQ_NUC_GB260_CO1_DADA2.fasta
+
+mmi=/media/vol/franzData/midoriDB/MIDORI2_UNIQ_NUC_GB260_CO1_DADA2.mmi
+reads=/media/vol/franzData/rawReadsReorganized/franzCO1_repset.fa
+minimap2 \
+  --secondary=no \
+  $mmi $reads \
+  1> franzCO1_repset_taxAssignments.paf \
+  2> franzCO1_repset_taxAssignments.log &
+
+## we want the first column (ASV number), the 6th column of taxonomy, and the last (12) column, the mapQ values
+
+cut -f1,6,12 franzCO1_repset_taxAssignments.paf > minimap2taxonomyWithMappingQualities.tsv
+cut -f1,6 franzCO1_repset_taxAssignments.paf > minimap2taxonomyNoMappingQualities.tsv
+
+
+colnames(tax_table(ps)) <- c("Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+## so, let's generate three CSVs:
+## 1. The tax table generated by the conservative classifier in DADA2
+## 2. The taxonomic table generated by the Midori database and Minimap2, with only highest quality alignments
+## 3. The taxonomic table generated by the Midori database and Minimap2, with mapping quality scores and lower score alignments
+
+## the first two should be formatted so as to be easily inserted into a phyloseq object
+## the last one is a reference for decision making: how much can an assignment be trusted, and
+## alternative possible assignments
+
+## the second one is the trickiest, let's use python/pandas:
+
+conda activate spatialDirt ## conda env from another project
+
+import pandas as pd
+import natsort as ns
+
+
+aa = pd.read_csv("minimap2taxonomyWithMappingQualities.tsv", 
+                 sep="\t", 
+                 header=None, 
+                 names=("ASVnumber","TaxAssignment","MapQ"))
+
+aa.head()
+
+aa.tail()
+
+aa.ASVnumber.duplicated().sum() ## 2812 dups
+
+(~aa.ASVnumber.duplicated()).sum() ## 5470
+aa.ASVnumber.nunique() ## some ASVs didn't align to anything and aren't here. 
+
+
+## which ones are we missing?
+
+## now, for each ASV, find the assignment that matches this max.
+## in case of tie, I guess just take the first
+
+maxMapQEachASV = aa.groupby('ASVnumber')['MapQ'].transform("max")
+
+## which rows meet this maxQ? keep these
+idx = maxMapQEachASV == aa['MapQ']
+cc = aa[idx]
+
+## there are still duplicates, because alignments to different 
+## organisms sometimes score equally
+
+cc.ASVnumber.duplicated().sum() ## 817 dups
+
+## let's just keep the first for each match, for now
+dd = cc[~cc.ASVnumber.duplicated()]
+
+dd.shape ##5470 - hmm, lost some ASV names, because there was no match
+
+dd.set_index('ASVnumber', inplace=True)
+
+## can we restore these?
+otuNames= [ "ASV"+str(i) for i in range(1,6569) ]
+ee = pd.DataFrame(index=otuNames, columns=['TaxAssignment', 'MapQ'])
+ee.fillna(dd, inplace=True)
+
+## can we split up this Taxonomic assignment to columns?
+ff = ee['TaxAssignment'].str.split(pat="_.*?;", expand=True, regex=True)
+ff.columns=["Phylum", "Class", "Order", "Family", "Genus", "Species"]
+## add the mapq scores back in:
+ff['MapQ'] = ee['MapQ'] 
+ff.reset_index(inplace=True)
+ff.rename({'index':'ASVnumber'}, axis='columns', inplace=True)
+ 
+## looks okay. Now we need to get these taxonomy tables to R and phyloseq:
+
+## one with quality scores:
+ff.to_csv("minimap2taxAssignments_cleanedup.csv", index=False, na_rep="NA")
+
+## one without, for direct import to phyloseq:
+gg = ff.drop('MapQ', axis=1)
+gg.to_csv("minimap2taxAssignments_forPhyloseq.csv", index=False, na_rep="NA")
+
+#### back in R ####
+
+## import without the MapQ scores
+minimapTaxAssign <- read.csv('minimap2taxAssignments_forPhyloseq.csv', row.names="ASVnumber")
+
+aa <- read.csv("minimap2taxAssignments_cleanedup.csv", row.names=1)
+
+## remove the mapq column:
+head(minimapTaxAssign)
+
+## will phyloseq accept this? 
+tax_table(ps) <- as.matrix(minimapTaxAssign)
+
+## works. Update the repo with these two versions. And the original RDP/DADA2 object,
+## which might be interesting. Code added above
+
+## these are the three taxonomy objects of interest
+
+'minimap2taxAssignments_cleanedup.csv'
+'minimap2taxAssignments_forPhyloseq.csv'
+'rdpClassifier_CO1_taxonomy.csv'
+
+## more descriptive name
+mv 'minimap2taxAssignments_cleanedup.csv' 'minimap2taxAssignments_with_MapQ.csv'
 
